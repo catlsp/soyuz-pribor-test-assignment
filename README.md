@@ -59,7 +59,9 @@ python -m product_copywriter examples/inputs.json --format json --output example
 
 JSON-результат содержит `seo_title`, `description`, `specs` (массив объектов `name`/`value`), `queries`, `commercial_block`, `missing_fields` и `mode`. `mode` различает результат языковой модели и демонстрационный результат. Markdown-режим представляет те же данные в читаемом виде.
 
-Готовые демонстрационные результаты: [JSON](examples/results.json) и [Markdown](examples/results.md). Реальные запросы к LLM при подготовке сдачи не выполнялись; API-клиент проверен тестами с подменённым транспортом.
+Реальная генерация проверена через `https://cheapvibecode.ru/v1`, модель `gpt-6-luna`, на двух объектах из `examples/inputs.json`. [Исходный ответ](examples/results.llm.raw.json) сохранён без изменений; длины описаний — 1011 и 936 символов. В первом тексте редакторская проверка обнаружила неподтверждённые качественные утверждения. Они удалены в примере после редактирования: [JSON](examples/results.llm.json) и [Markdown](examples/results.llm.md). Такие файлы имеют отдельную метку `LLM + редакторская проверка`. Порядок воспроизведения и замечания: [docs/live-check.md](docs/live-check.md).
+
+Демонстрационные результаты без обращения к API также доступны: [JSON](examples/results.json) и [Markdown](examples/results.md). Автоматические тесты и CI работают без реальных запросов к провайдеру.
 
 Проверки проекта:
 
