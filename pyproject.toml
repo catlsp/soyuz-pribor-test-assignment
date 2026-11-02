@@ -1,0 +1,6 @@
+[project]
+name = "ai-b2b-product-copywriter"
+version = "0.1.0"
+description = "Russian B2B product-card copywriter using an OpenAI-compatible API"
+requires-python = ">=3.10"
+dependencies = []
