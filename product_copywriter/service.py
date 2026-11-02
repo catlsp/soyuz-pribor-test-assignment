@@ -1,6 +1,7 @@
 """OpenAI-compatible chat completions client and deterministic demo mode."""
 from __future__ import annotations
 import json
+import http.client
 import math
 import os
 import socket
@@ -8,7 +9,8 @@ import time
 import urllib.parse
 import urllib.error
 import urllib.request
-from .models import validate_product, validate_output, deterministic_specs
+from .models import validate_product
+from .grounding import build_catalog, default_plan, render_plan
 from .prompts import SYSTEM_PROMPT, user_prompt
 
 RETRYABLE = {429, 500, 502, 503, 504}
@@ -26,12 +28,16 @@ def _endpoint() -> str:
     local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
     if not parsed.hostname or (parsed.scheme != "https" and not (parsed.scheme == "http" and local)):
         raise RuntimeError("OPENAI_BASE_URL должен использовать HTTPS (HTTP допускается только для localhost).")
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        raise RuntimeError("OPENAI_BASE_URL не должен содержать логин, пароль, параметры запроса или фрагмент.")
     return base + "/chat/completions"
 
 def _call_api(product: dict, correction: str = "") -> dict:
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError("Не задан OPENAI_API_KEY.")
+    if not key.isascii() or any(character.isspace() for character in key):
+        raise RuntimeError("OPENAI_API_KEY содержит недопустимые символы или пробелы; введите ключ заново.")
     payload = {"model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"), "temperature": 0.6,
                "response_format": {"type": "json_object"}, "messages": [
                    {"role": "system", "content": SYSTEM_PROMPT},
@@ -61,8 +67,8 @@ def _call_api(product: dict, correction: str = "") -> dict:
             raise RuntimeError(f"API вернул ошибку HTTP {exc.code}.") from None
         except (TimeoutError, socket.timeout):
             raise RuntimeError("Истекло время ожидания ответа API.") from None
-        except urllib.error.URLError:
-            raise RuntimeError("Не удалось подключиться к API.") from None
+        except (urllib.error.URLError, ConnectionError, http.client.HTTPException, OSError):
+            raise RuntimeError("Не удалось подключиться к API или соединение было прервано.") from None
         except (KeyError, IndexError, json.JSONDecodeError, UnicodeDecodeError):
             raise ValueError("API вернул ответ в неподдерживаемом формате.") from None
         except (TypeError, AttributeError):
@@ -84,7 +90,7 @@ def generate(product: dict, *, demo: bool = False) -> dict:
     error = ""
     for attempt in range(2):
         try:
-            return validate_output(_call_api(normalized, error), normalized)
+            return render_plan(_call_api(normalized, error), normalized)
         except ValueError as exc:
             if attempt:
                 raise RuntimeError("Модель не смогла подготовить корректный ответ: " + str(exc)) from None
@@ -92,36 +98,6 @@ def generate(product: dict, *, demo: bool = False) -> dict:
     raise RuntimeError("Не удалось создать карточку.")
 
 def generate_demo(product: dict) -> dict:
-    """Deterministic illustrative copy; explicitly labeled as non-LLM output."""
-    p = validate_product(product)
-    title = p["name"][:70]
-    facts = "; ".join(f"{k}: {v}" for k, v in p["specs"].items()) or "технические характеристики пока не указаны"
-    maker = f" Производитель: {p['manufacturer']}." if p["manufacturer"] else " Производитель не указан в исходных данных."
-    source = p["description"].strip()
-    if source and source[-1] not in ".!?…":
-        source += "."
-    sentences = [f"{p['name']}.{(' ' + source) if source else ''}{maker}",
-        f"В исходных данных приведены характеристики: {facts}.",
-        "Перед закупкой сопоставьте сведения в карточке с требованиями к приобретаемому прибору.",
-        "Если нужного параметра нет, запросите его у поставщика и сверьте ответ с документацией производителя.",
-        "Уточните назначение, рабочие задачи и необходимые характеристики для выбора подходящей модели.",
-        "Проверьте, что описание и переданные характеристики относятся к одной и той же версии товара.",
-        "При сравнении предложений используйте только подтверждённые параметры, а неизвестные значения уточняйте отдельно.",
-        "Карточка составлена по предоставленным сведениям и не заменяет официальную техническую документацию.",
-        "Если для принятия решения нужны дополнительные данные, запросите актуальное описание у продавца.",
-        "Так вы сможете оценить соответствие товара своим требованиям до оформления заказа.",
-        "Для закупки заранее подготовьте список обязательных требований и сравните с ним сведения, которые продавец подтвердит по документации.",
-        "Проверяйте каждое значение отдельно и уточняйте неполные данные до принятия решения."]
-    desc = ""
-    for sentence in sentences:
-        candidate = (desc + " " + sentence).strip()
-        if len(candidate) <= 1200:
-            desc = candidate
-        if len(desc) >= 800:
-            break
-    specs, missing = deterministic_specs(p)
-    return {"seo_title": title, "description": desc, "specs": specs,
-            "queries": [p["name"], f"купить {p['name']}", f"{p['name']} для предприятия"],
-            "commercial_block": (f"Кому подходит: специалистам по закупке и подбору приборов. Задачи по исходному описанию: {source}" if source
-                else "Кому подходит: специалистам по закупке и подбору приборов. Задачи применения: данных нет; уточните назначение и требования у поставщика перед закупкой."),
-            "missing_fields": missing, "mode": "DEMO — не LLM"}
+    """Use the same grounded renderer, with no model call and an explicit label."""
+    normalized = validate_product(product)
+    return render_plan(default_plan(build_catalog(normalized)), normalized, demo=True)

@@ -19,18 +19,26 @@ def validate_product(product: dict[str, Any]) -> dict[str, Any]:
     name = product.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ProductValidationError("Обязательное поле name должно содержать название прибора.")
-    manufacturer = product.get("manufacturer", "")
-    description = product.get("description", "")
+    manufacturer = product.get("manufacturer")
+    description = product.get("description")
+    manufacturer = "" if manufacturer is None else manufacturer
+    description = "" if description is None else description
     if not isinstance(manufacturer, str) or not isinstance(description, str):
         raise ProductValidationError("manufacturer и description должны быть строками.")
-    specs = product.get("specs", {})
+    specs = product.get("specs")
+    specs = {} if specs is None else specs
     if not isinstance(specs, dict) or not all(isinstance(k, str) and k.strip() and _scalar(v) for k, v in specs.items()):
         raise ProductValidationError("specs должен быть объектом со строковыми названиями и простыми значениями.")
-    expected = product.get("expected_fields", list(DEFAULT_EXPECTED_FIELDS))
+    expected = product.get("expected_fields")
+    expected = list(DEFAULT_EXPECTED_FIELDS) if expected is None else expected
     if not isinstance(expected, list) or not all(isinstance(x, str) and x.strip() for x in expected):
         raise ProductValidationError("expected_fields должен быть списком строк.")
-    return {"name": name.strip(), "manufacturer": manufacturer.strip(), "specs": dict(specs),
-            "description": description.strip(), "expected_fields": list(dict.fromkeys(x.strip() for x in expected))}
+    placeholders = {"данных нет", "нет данных", "данные не предоставлены", "не указано"}
+    def clean(value):
+        value = value.strip()
+        return "" if value.casefold().rstrip(".") in placeholders else value
+    return {"name": name.strip(), "manufacturer": clean(manufacturer), "specs": dict(specs),
+            "description": clean(description), "expected_fields": list(dict.fromkeys(x.strip() for x in expected))}
 
 def _scalar(value: Any) -> bool:
     if value is None or isinstance(value, str):
@@ -44,7 +52,6 @@ def _scalar(value: Any) -> bool:
 def deterministic_specs(product: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
     specs = product["specs"]
     rows = [{"name": str(k), "value": str(v).strip() if v is not None and str(v).strip() else "данных нет"} for k, v in specs.items()]
-    known = {k.casefold() for k in specs}
     missing = []
     for field in product["expected_fields"]:
         match = next((r for r in rows if r["name"].casefold() == field.casefold()), None)
@@ -73,10 +80,12 @@ def validate_output(data: Any, product: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("SEO-заголовок должен содержать до 70 символов.")
     if not isinstance(desc, str) or not 800 <= len(desc.strip()) <= 1200:
         raise ValueError("Описание должно содержать от 800 до 1200 символов.")
-    if not isinstance(comm, str) or not comm.strip():
-        raise ValueError("commercial_block должен быть непустой строкой.")
+    if not isinstance(comm, str) or not comm.strip() or len(comm.strip()) > 600:
+        raise ValueError("commercial_block должен быть непустой строкой до 600 символов.")
     if not isinstance(queries, list) or not 3 <= len(queries) <= 5 or not all(isinstance(q, str) and q.strip() for q in queries):
         raise ValueError("queries должен содержать от 3 до 5 непустых строк.")
+    if len({q.strip().casefold() for q in queries}) != len(queries):
+        raise ValueError("Поисковые запросы должны быть различными.")
     fact_text = str(product).casefold().replace(",", ".")
     nums = set(re.findall(r"\d+(?:[.,]\d+)?", fact_text))
     prose = " ".join([title, desc, comm, *queries])
